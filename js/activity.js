@@ -1,6 +1,9 @@
 const dataFile = await d3.csv("./data/routes.csv");
 
 const colornone = "#ccc";
+// colors for highlighting links and text on hover (must differ from airlineColor)
+const colorin = "red";   // incoming routes 
+const colorout = "blue"; // outgoing routes
 
 // define colors for airlines, you can expand this as needed, WN is Southwest, B6 is JetBlue
 const airlineColor = { WN: "orange", B6: "steelblue" };
@@ -74,6 +77,98 @@ function draw(airlineFilter) {
 }
 
 draw("all"); // initial draw
+
+function createChart(data) {
+  const width = 954;
+  const radius = width / 2;
+
+  const tree = d3.cluster()
+    .size([2 * Math.PI, radius - 100]);
+  const root = tree(bilink(d3.hierarchy(data)
+      .sort((a, b) => d3.ascending(a.height, b.height) || d3.ascending(a.data.name, b.data.name))));
+
+  const svg = d3.create("svg")
+      .attr("width", width)
+      .attr("height", width)
+      .attr("viewBox", [-width / 2, -width / 2, width, width])
+      .attr("style", "max-width: 100%; height: auto; font: 10px sans-serif;");
+
+  // create tooltip div (in page body) for better visibility than <title>
+  const tooltip = d3.select("body").append("div")
+      .attr("class", "tooltip")
+      .style("position", "absolute")
+      .style("pointer-events", "none")
+      .style("padding", "4px 8px")
+      .style("background", "rgba(255,255,255,0.9)")
+      .style("border", "1px solid #888")
+      .style("border-radius", "4px")
+      .style("font-size", "10px")
+      .style("visibility", "hidden");
+
+  const node = svg.append("g")
+    .selectAll()
+    .data(root.leaves())
+    .join("g")
+      .attr("transform", d => `rotate(${d.x * 180 / Math.PI - 90}) translate(${d.y},0)`).append("text")
+      .attr("dy", "0.31em")
+      .attr("x", d => d.x < Math.PI ? 6 : -6)
+      .attr("text-anchor", d => d.x < Math.PI ? "start" : "end")
+      .attr("transform", d => d.x >= Math.PI ? "rotate(180)" : null)
+      .text(d => d.data.name)
+      .each(function(d) { d.text = this; })
+      .on("mouseover", function(event, d) {
+          overed.call(this, event, d);
+          const region = d.parent ? d.parent.data.name : "";
+          tooltip.html(`Airport: ${d.data.name} (${region})<br/>${d.incoming.length} incoming<br/>${d.outgoing.length} outgoing`)
+              .style("top", (event.pageY + 10) + "px")
+              .style("left", (event.pageX + 10) + "px")
+              .style("visibility", "visible");
+      })
+      .on("mousemove", function(event, d) {
+          tooltip.style("top", (event.pageY + 10) + "px")
+                 .style("left", (event.pageX + 10) + "px");
+      })
+      .on("mouseout", function(event, d) {
+          outed.call(this, event, d);
+          tooltip.style("visibility", "hidden");
+      });
+
+  const line = d3.lineRadial()
+    .curve(d3.curveBundle.beta(0.85))
+    .radius(d => d.y)
+    .angle(d => d.x);
+
+  const link = svg.append("g")
+      .attr("fill", "none")
+    .selectAll()
+    .data(root.leaves().flatMap(leaf => leaf.outgoing))
+    .join("path")
+      .style("mix-blend-mode", "multiply")
+      .attr("d", ([i, o]) => line(i.path(o)))
+      .attr("stroke", ([i, o, airline]) => airlineColor[airline] || colornone)
+      .each(function(d) { d.path = this; });
+
+  function overed(event, d) {
+    link.style("mix-blend-mode", null);
+    d3.select(this).attr("font-weight", "bold");
+    d3.selectAll(d.incoming.map(d => d.path)).attr("stroke", colorin).raise();
+    d3.selectAll(d.incoming.map(([d]) => d.text)).attr("fill", colorin).attr("font-weight", "bold");
+    d3.selectAll(d.outgoing.map(d => d.path)).attr("stroke", colorout).raise();
+    d3.selectAll(d.outgoing.map(([, d]) => d.text)).attr("fill", colorout).attr("font-weight", "bold");
+  }
+
+  function outed(event, d) {
+    link.style("mix-blend-mode", "multiply");
+    d3.select(this).attr("font-weight", null);
+    d3.selectAll(d.incoming.map(d => d.path)).attr("stroke", null);
+    d3.selectAll(d.incoming.map(([d]) => d.text)).attr("fill", null).attr("font-weight", null);
+    d3.selectAll(d.outgoing.map(d => d.path)).attr("stroke", null);
+    d3.selectAll(d.outgoing.map(([, d]) => d.text)).attr("fill", null).attr("font-weight", null);
+  }
+
+  return svg.node();
+}
+
 
 // adapt chart visualization code from 
 // https://observablehq.com/@d3/hierarchical-edge-bundling
